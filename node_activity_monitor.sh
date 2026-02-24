@@ -17,7 +17,20 @@ STATE_FILE="/tmp/node_activity_state"
 # ===================== FUNÇÕES =====================
 
 btc() {
-  "$BITCOIN_CLI" -datadir="$BITCOIN_DATADIR" "$@" 2>/dev/null
+  # ===== 1) CLI direto (Ubuntu / sistema externo) =====
+  if [[ -n "$BITCOIN_CLI" && -x "$BITCOIN_CLI" ]]; then
+    "$BITCOIN_CLI" -datadir="$BITCOIN_DATADIR" "$@" 2>/dev/null && return
+  fi
+
+  # ===== 2) Umbrel via Docker (sudo) =====
+  if command -v docker >/dev/null 2>&1; then
+    sudo docker exec bitcoin_app_1 \
+      bitcoin-cli -rpccookiefile=/data/bitcoin/.cookie \
+      "$@" 2>/dev/null && return
+  fi
+
+  echo "ERROR: Cannot access bitcoin-cli in this environment." >&2
+  return 1
 }
 
 notify_telegram() {

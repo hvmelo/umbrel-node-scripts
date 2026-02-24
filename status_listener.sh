@@ -22,7 +22,20 @@ STATE_FILE="/tmp/status_prev"
 # ===================== FUNÇÕES =====================
 
 btc() {
-  "$BITCOIN_CLI" -datadir="$BITCOIN_DATADIR" "$@" 2>/dev/null
+  # ===== 1) CLI direto (Ubuntu / sistema externo) =====
+  if [[ -n "$BITCOIN_CLI" && -x "$BITCOIN_CLI" ]]; then
+    "$BITCOIN_CLI" -datadir="$BITCOIN_DATADIR" "$@" 2>/dev/null && return
+  fi
+
+  # ===== 2) Umbrel via Docker (sudo) =====
+  if command -v docker >/dev/null 2>&1; then
+    sudo docker exec bitcoin_app_1 \
+      bitcoin-cli -rpccookiefile=/data/bitcoin/.cookie \
+      "$@" 2>/dev/null && return
+  fi
+
+  echo "ERROR: Cannot access bitcoin-cli in this environment." >&2
+  return 1
 }
 
 check_rpc() {
@@ -45,8 +58,58 @@ format_time() {
 }
 
 get_battery_percent() {
-  upower -i /org/freedesktop/UPower/devices/battery_BAT0 \
-    | awk '/percentage/ {gsub("%",""); printf "%d\n", $2}'
+  if command -v upower >/dev/null 2>&1; then
+    battery=$(upower -e | grep battery)
+
+    if [[ -n "$battery" ]]; then
+      info=$(upower -i "$battery")
+
+      percent=$(echo "$info" | awk '/percentage/ {print $2}')
+      state=$(echo "$info" | awk '/state/ {print $2}')
+
+      case "$state" in
+        charging)
+          echo "AC (charging $percent)"
+          ;;
+        discharging)
+          echo "$percent"
+          ;;
+        fully-charged)
+          echo "AC (full $percent)"
+          ;;
+        *)
+          echo "$percent"
+          ;;
+      esac
+    else
+      echo "AC"
+    fi
+  else
+    echo "N/A"
+  fi
+}
+
+get_temperature() {
+  # ===== Raspberry Pi =====
+  if command -v vcgencmd >/dev/null 2>&1; then
+    vcgencmd measure_temp | cut -d= -f2
+    return
+  fi
+
+  # ===== Linux padrão =====
+  if [[ -f /sys/class/thermal/thermal_zone0/temp ]]; then
+    temp_raw=$(cat /sys/class/thermal/thermal_zone0/temp)
+    awk "BEGIN {printf \"%.1f°C\", $temp_raw/1000}"
+    return
+  fi
+
+  # ===== lm-sensors =====
+  if command -v sensors >/dev/null 2>&1; then
+    sensors | awk '/Package id 0:/ {print $4; exit}'
+    return
+  fi
+
+  echo "N/A"
 }
 
 seconds_to_human() {
@@ -67,6 +130,7 @@ send_status() {
   progress_raw=$(echo "$info" | jq -r .verificationprogress)
   percent_sync=$(printf "%.2f" "$(echo "$progress_raw * 100" | bc -l)")
   battery=$(get_battery_percent)
+  temp=$(get_temperature)
 
   # =========================================================
   # 🟡 MODO IBD
@@ -103,12 +167,13 @@ send_status() {
     fi
 
     send_telegram "📡 <b>Bitcoin Node Status (IBD)</b>
-<b>Progresso:</b> ${percent_sync}%
-<b>Blocos:</b> ${blocks} / ${headers}
-<b>Velocidade:</b> ${speed} blocos/min
-<b>Tempo restante:</b> ${tempo_restante}
+<b>Progress:</b> ${percent_sync}%
+<b>Blocks:</b> ${blocks} / ${headers}
+<b>Speed:</b> ${speed} blocos/min
+<b>Remaining:</b> ${tempo_restante}
 <b>ETA:</b> ${eta}
-<b>Bateria:</b> ${battery}%"
+<b>Temperature:</b> ${temp}
+<b>Battery:</b> ${battery}"
 
     cat > "$STATE_FILE" <<EOF
 prev_blocks=$blocks
@@ -146,7 +211,8 @@ EOF
 ⏱ <b>Last block:</b> ${age}s ago
 🧱 <b>Txs in block:</b> ${txs}
 ⏳ <b>Uptime:</b> ${uptime_human}
-🔋 <b>Bateria:</b> ${battery}%"
+🌡️ <b>Temperature:</b> ${temp}
+🔋 <b>Battery:</b> ${battery}"
 }
 
 # ===================== SYSINFO =====================
@@ -162,12 +228,15 @@ send_sysinfo() {
   cpu=$(top -bn1 | awk '/Cpu\(s\)/ {printf "%.1f", $2+$4}')
 
   battery=$(get_battery_percent)
+  
+  temp=$(get_temperature)
 
   send_telegram "🧠 <b>System Info</b>
 <b>Storage:</b> ${disk_used} / ${disk_total}
 <b>RAM:</b> ${ram_used} / ${ram_total}
 <b>CPU:</b> ${cpu}%
-<b>Bateria:</b> ${battery}%"
+<b>Temperature:</b> ${temp}
+<b>Battery:</b> ${battery}"
 }
 
 # ===================== HELP =====================
