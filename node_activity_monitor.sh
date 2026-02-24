@@ -164,10 +164,11 @@ Node may be stalled or disconnected."
 
     age=$((now - block_time))
 
-    notify_telegram "🟢 <b>Node OK</b>
-<b>Height:</b> ${blocks}
-<b>Peers:</b> ${peers}
-<b>Last block:</b> $(format_time $age) ago"
+    notify_telegram "📊 <b>Bitcoin Node Report</b>
+    <b>Height:</b> ${blocks}
+    <b>Peers:</b> ${peers}
+    <b>Lag:</b> ${behind} blocks
+    <b>Last block:</b> $(format_time $age) ago"
 
     last_periodic_ts=$now
   fi
@@ -177,11 +178,11 @@ Node may be stalled or disconnected."
   # =====================================================
 
   cat > "$STATE_FILE" <<EOF
-last_block_height=${last_block_height}
-last_block_time=${last_block_time}
-last_alert_ts=${last_alert_ts}
-last_periodic_ts=${last_periodic_ts}
-last_uptime=${last_uptime}
+  last_block_height=${last_block_height}
+  last_block_time=${last_block_time}
+  last_alert_ts=${last_alert_ts}
+  last_periodic_ts=${last_periodic_ts}
+  last_uptime=${last_uptime}
 EOF
 
 done
